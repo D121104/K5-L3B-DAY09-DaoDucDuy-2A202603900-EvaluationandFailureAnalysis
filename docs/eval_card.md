@@ -16,3 +16,26 @@ Card này đi kèm các báo cáo M4 và được dùng lại ở Day 10.
 - **Ngoài phạm vi:** quyết định pháp lý/tranh chấp nhiều đơn, dữ liệu production và quyết định vượt policy/approval.
 - **Giới hạn / bằng chứng còn thiếu:** MockLLM, 14 item, 5 seed và judge replay công khai; chưa đo trên người dùng thật. Paired CI với mẫu nhỏ còn rộng; report là bằng chứng mô phỏng, không phải đảm bảo production.
 - **Khi nào tăng eval-set version:** thêm claim từ trace/adversarial hoặc đổi nhãn; build/check lại eval set và sinh baseline mới trước khi so sánh.
+
+## Advanced M5 — v2 và slice gate
+
+- **Eval set v2:** 28 item (14 v1 + 14 adversarial), 28 nhãn riêng; SHA-12 `032f9dd359bb`. Mọi cơ chế adversarial được map qua `src/config/fm_map.yaml`; check sạch và mỗi FM bị tấn công có ít nhất 3 item trong v2.
+- **Metric spec:** `src/config/metric_spec_v2.yaml`; các slice blocking là `money_movement/refund_amount_correct` (floor 0.90) và `adversarial/pass_rate` (floor 0.90, paired CI).
+- **Baseline v2:** `E-swarm-20261118-032f`; pass_rate=0.9786, refund_amount_correct=0.9786, reply_amount_correct=1.0.
+- **Control:** `fixed` và `honest_refactor` qua gate. `slice_regression` có pass_rate tổng=0.9357 (trên floor 0.85); adversarial slice=0.9143 và CI [-0.186, +0.057] nên qua, nhưng money_movement refund correctness=0.85 dưới floor 0.90 nên gate chặn đúng slice này. Mutation scorecard: 3/3 regression bị chặn, 0 false alarm.
+- **Bằng chứng:** `src/reports/baseline_v2.json`, `eval_fixed_v2.json`, `eval_honest_refactor_v2.json`, `eval_slice_regression_v2.json`; report sinh từ lệnh eval, không sửa tay.
+
+## Advanced M6 — reliability / pass^k
+
+- **Ước lượng:** `pass_at_k = 1 - C(n-c,k)/C(n,k)` và `pass_hat_k = C(c,k)/C(n,k)` tính theo từng item rồi lấy trung bình; invalid `n/c/k` bị từ chối.
+- **A/A:** cùng swarm, seeds 11/22/33/44/55 so với 66/77/88/99/110; Δ=`0.0000` cho toàn bộ metric trên MockLLM. Nhiễu bằng 0 ở simulator không có nghĩa là 0 với model thật; production cần A/A đủ lớn và đặt floor dưới cận dưới của noise band.
+- **Ngưỡng pass_hat_5:** baseline v2=0.8929, chọn floor=0.85 (dưới baseline 0.0429 và ngoài A/A noise quan sát được); `fixed`/`honest_refactor`=1.0 qua, `flaky_regression`=0.5714 bị chặn.
+- **Tách lỗi hiếm khỏi trung bình:** flaky chỉ lỗi ở seed 33 trong mỗi nhóm 5; pass_rate=0.9143 vẫn trên floor 0.85 và paired drop không bật với metric v2. Gate chặn riêng `pass_hat_5`; money_movement=0.9167 và adversarial=0.9286 vẫn qua slices.
+- **Giới hạn cỡ mẫu:** 5 seed không đảm bảo bắt lỗi xác suất 1/3; lỗi hiếm có thể vắng khỏi mẫu hoặc ước lượng reliability dao động lớn. Cần tăng số seed và hiệu chỉnh lại floor trước khi áp dụng với model stochastic.
+- **Bằng chứng:** `src/reports/eval_flaky_regression_v2.json`; A/A dùng `python -m lab9.mutation --spec config/metric_spec_v2.yaml --aa 66,77,88,99,110`.
+
+## Expert M7 — integrity / chống gaming
+
+- **Integrity gate:** từ chối metric NaN/Inf, số lượng row sai so với manifest, duplicate hoặc thiếu/thừa khóa item-seed, evaluator failures, metric grader bị thiếu/None, relabel slice, và threshold/slice bị nới khi eval-set version giữ nguyên.
+- **Trap run:** `python -m lab9.traps --pr reports/eval_slice_regression_v2.json --baseline reports/baseline_v2.json --spec config/metric_spec_v2.yaml` chặn đủ 4/4 public traps: `evaluator_errors_as_nan`, `dropped_failing_rows`, `cherry_picked_seeds`, `loosened_spec`; mỗi trap khiến gate trả reason `INTEGRITY`.
+- **Giới hạn còn lại:** report baseline được tin cậy theo quy trình lưu/commit và SHA eval set; hidden traps có thể kết hợp nhiều thao tác hoặc sửa code grader, vì vậy vẫn cần review source và giữ quyền sở hữu baseline tách biệt.
