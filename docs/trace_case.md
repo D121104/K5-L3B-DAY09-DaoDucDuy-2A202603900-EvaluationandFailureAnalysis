@@ -10,18 +10,18 @@ python -m lab9.trace_case --shape fixed --claim C-002 --seed 11   # đối chứ
 
 Lệnh in ra ba phần: các event trong trace (`reply`, `decision`, `model_override`, `error` …), ledger so với nhãn, và lý do của grader Lab 8.
 
-## Mẫu điền (mỗi bạn 1 case, lấy từ trial đang fail trong report)
+## Case: ticket ghi trễ 5 ngày, order chỉ trễ 2 ngày
 
 | Trường | Nội dung |
 |---|---|
-| Trial | `<shape> <claim>@<seed>`, run ID trong report |
-| Triệu chứng | Grader nào fail; reply nói gì so với ledger ghi gì |
-| Bước sai đầu tiên | Số thứ tự event + kind + trích payload (≤1 dòng) |
-| Vì sao là bước *đầu tiên* | Các bước trước đó đúng ra sao (dẫn số event) |
-| Failure mode | Mã FM-xx trong `docs/failure_taxonomy.md` |
-| Đối chứng | Cùng claim@seed trên shape `fixed`: bước đó khác thế nào |
-| Regression test | Tên test + grader/assert nào bắt được; đã thấy fail trên variant lỗi và pass trên `fixed` chưa |
-| Chưa chắc chắn | Điều trace không chứng minh được |
+| Trial | `seeded_regression C-002@55`; run ID được sinh lại mỗi lần chạy bởi `lab9.trace_case`. |
+| Triệu chứng | Lab 8 grader FAIL (`status resolved != denied`); reply báo hoàn 20.000đ, ledger ghi 20.000đ nhưng label yêu cầu denied và 0đ. |
+| Bước sai đầu tiên | Event 3 `model_override`: `{"delay_days": 5}`. |
+| Vì sao là bước *đầu tiên* | Event 1 handoff và event 2 investigator lấy order O-202 từ DB (delay_days=2) bình thường; event 3 mới thay fact DB bằng số ngày trong ticket. Quote event 4 và refund sau đó nhất quán với fact sai vừa bị override. |
+| Failure mode | FM-03 `ticket_trust`; outcome cũng vi phạm policy vì O-202 chỉ trễ 2 ngày. |
+| Đối chứng | `fixed C-002@55` không có `model_override`; quote là 0 (`no_entitlement`), reply từ chối và ledger=0 đúng label. |
+| Regression test | `test_seeded_ticket_trust_regression_is_caught` trong `tests/test_lab9_graders.py`: chạy cả seeded_regression và fixed; `RefundAmountCorrect` fail ở variant lỗi, pass ở fixed. |
+| Chưa chắc chắn | Đây là MockLLM/public fixture với seed cố định; không ước lượng tần suất lỗi trên model hoặc traffic production. |
 
 ## Quy tắc
 

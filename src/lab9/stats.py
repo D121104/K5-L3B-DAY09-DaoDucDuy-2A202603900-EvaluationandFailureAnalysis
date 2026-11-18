@@ -7,33 +7,73 @@ Reference values to self-check are in tests/test_lab9_stats.py.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
+
+import numpy as np
+from scipy.stats import bootstrap
 
 POS = "FAIL"   # the judge's job is to FIND failures, so FAIL is the positive class
 
 
 def confusion(human: Sequence[str], judge: Sequence[str]) -> dict[str, int]:
     """tp/fp/fn/tn with FAIL as positive."""
-    # TODO M2
-    raise NotImplementedError
+    if len(human) != len(judge):
+        raise ValueError("human and judge labels must have equal length")
+    tp = fp = fn = tn = 0
+    for actual, predicted in zip(human, judge):
+        actual_fail = actual.upper() == POS
+        predicted_fail = predicted.upper() == POS
+        if actual_fail and predicted_fail:
+            tp += 1
+        elif predicted_fail:
+            fp += 1
+        elif actual_fail:
+            fn += 1
+        else:
+            tn += 1
+    return {"tp": tp, "fp": fp, "fn": fn, "tn": tn}
 
 
 def precision_recall(human: Sequence[str], judge: Sequence[str]) -> tuple[float, float]:
-    # TODO M2: precision = tp/(tp+fp), recall = tp/(tp+fn); return 0.0 when the denominator is 0
-    raise NotImplementedError
+    cm = confusion(human, judge)
+    precision_den = cm["tp"] + cm["fp"]
+    recall_den = cm["tp"] + cm["fn"]
+    precision = cm["tp"] / precision_den if precision_den else 0.0
+    recall = cm["tp"] / recall_den if recall_den else 0.0
+    return precision, recall
 
 
 def cohen_kappa(human: Sequence[str], judge: Sequence[str]) -> float:
     """kappa = (p_o - p_e) / (1 - p_e). Raise ValueError when undefined (p_e == 1):
     a constant judge has no signal and must FAIL calibration, not pass on a technicality."""
-    # TODO M2
-    raise NotImplementedError
+    if len(human) != len(judge):
+        raise ValueError("human and judge labels must have equal length")
+    if not human:
+        raise ValueError("kappa is undefined for empty labels")
+    n = len(human)
+    observed = sum(a.upper() == b.upper() for a, b in zip(human, judge)) / n
+    categories = {label.upper() for label in human} | {label.upper() for label in judge}
+    expected = sum(
+        sum(label.upper() == category for label in human)
+        * sum(label.upper() == category for label in judge)
+        for category in categories
+    ) / (n * n)
+    if math.isclose(expected, 1.0):
+        raise ValueError("kappa is undefined when expected agreement is 1")
+    return (observed - expected) / (1.0 - expected)
 
 
 def rogan_gladen(observed_rate: float, sensitivity: float, specificity: float) -> float:
     """Correct an observed failure rate for judge error; clip to [0, 1]."""
-    # TODO M2: (p_obs + spec - 1) / (sens + spec - 1)
-    raise NotImplementedError
+    if not all(math.isfinite(x) for x in (observed_rate, sensitivity, specificity)):
+        raise ValueError("rates must be finite")
+    if any(x < 0.0 or x > 1.0 for x in (observed_rate, sensitivity, specificity)):
+        raise ValueError("rates must be between 0 and 1")
+    denominator = sensitivity + specificity - 1.0
+    if math.isclose(denominator, 0.0):
+        raise ValueError("Rogan-Gladen is undefined when sensitivity + specificity = 1")
+    return min(1.0, max(0.0, (observed_rate + specificity - 1.0) / denominator))
 
 
 def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int = 1000,
@@ -41,8 +81,30 @@ def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int
     """a[i], b[i] = per-item mean over seeds, SAME items, SAME order.
     Return (mean(a)-mean(b), lo, hi) with scipy.stats.bootstrap(paired=True, method="percentile",
     rng=numpy.random.default_rng(rng)). If a == b everywhere return (0.0, 0.0, 0.0)."""
-    # TODO M4
-    raise NotImplementedError
+    if len(a) != len(b):
+        raise ValueError("paired samples must have equal length")
+    if not a:
+        raise ValueError("paired samples must not be empty")
+    if n_resamples < 1:
+        raise ValueError("n_resamples must be positive")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+    a_values, b_values = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    if not np.isfinite(a_values).all() or not np.isfinite(b_values).all():
+        raise ValueError("paired samples must be finite")
+    delta = float(np.mean(a_values - b_values))
+    if np.array_equal(a_values, b_values):
+        return (0.0, 0.0, 0.0)
+
+    def mean_difference(x: np.ndarray, y: np.ndarray, axis: int = 0) -> np.ndarray:
+        return np.mean(x - y, axis=axis)
+
+    result = bootstrap(
+        (a_values, b_values), mean_difference, paired=True, vectorized=True,
+        n_resamples=n_resamples, confidence_level=confidence, method="percentile",
+        rng=np.random.default_rng(rng),
+    )
+    return delta, float(result.confidence_interval.low), float(result.confidence_interval.high)
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:

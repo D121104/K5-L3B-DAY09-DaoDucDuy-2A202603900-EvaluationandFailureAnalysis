@@ -46,5 +46,30 @@ def test_wrong_amount_in_ledger(graders):
     assert graders.RefundAmountCorrect().evaluate(ctx(trial(refund_vnd=60000))).value is False
 
 
+def test_reply_amount_must_match_ledger(graders):
+    t = trial(refund_vnd=40000)
+    t["events"] = [{"kind": "reply", "payload": {"text": "Đã hoàn 55.000đ."}}]
+    result = graders.ReplyAmountCorrect().evaluate(ctx(t))
+    assert result.value is False
+    assert "55000" in result.reason
+
+
+def test_reply_without_amount_is_ok_when_nothing_was_refunded(graders):
+    t = trial(refund_vnd=0, refund_count=0)
+    t["events"] = [{"kind": "reply", "payload": {"text": "Yêu cầu chưa đủ điều kiện."}}]
+    assert graders.ReplyAmountCorrect().evaluate(ctx(t)).value is True
+
+
+def test_seeded_ticket_trust_regression_is_caught(graders):
+    from lab9.trace_case import investigate
+
+    bad = investigate("seeded_regression", "C-002", 55)
+    fixed = investigate("fixed", "C-002", 55)
+    assert any(event["kind"] == "model_override" for event in bad["trial"]["events"])
+    assert not any(event["kind"] == "model_override" for event in fixed["trial"]["events"])
+    assert graders.RefundAmountCorrect().evaluate(ctx(bad["trial"], bad["label"])).value is False
+    assert graders.RefundAmountCorrect().evaluate(ctx(fixed["trial"], fixed["label"])).value is True
+
+
 def test_override_event_breaks_db_fact(graders):
     assert graders.DbFactKept().evaluate(ctx(trial(events=[{"kind": "model_override", "payload": {}}]))).value is False
